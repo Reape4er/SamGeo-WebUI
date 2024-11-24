@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Карта Leaflet с инструментами рисования</title>
+
+    <!-- Подключение стилей Leaflet -->
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    />
+
+    <!-- Подключение скрипта Leaflet -->
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+
+    <!-- Подключение стилей и скрипта Leaflet.draw -->
+    <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
+        integrity="sha512-gc3xjCmIy673V6MyOAZhIW93xhM9ei1I+gLbmFjUHIjocENRsLX/QUE1htk5q1XV2D/iie/VQ8DXI6Vu8bexvQ=="
+        crossorigin="anonymous"
+        referrerpolicy="no-referrer"
+    />
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"
+        integrity="sha512-ozq8xQKq6urvuU6jNgkfqAmT7jKN2XumbrX1JiB3TnF7tI48DPI4Gy1GXKD/V3EExgAs1V+pRO7vwtS1LHg0Gw=="
+        crossorigin="anonymous"
+        referrerpolicy="no-referrer"
+    ></script>
+
+    <!-- Стиль для карты -->
+    <style>
+        #map {
+            width: 100%;
+            height: 900px;
+        }
+    </style>
+    <!-- geotiff.js -->
+    <script src="https://cdn.jsdelivr.net/npm/geotiff@0.3.6/dist/geotiff.min.js"></script>
+    <!-- plotty -->
+    <script src="https://cdn.jsdelivr.net/npm/plotty@0.4.9/dist/plotty.min.js"></script>
+
+    <!-- leaflet-geotiff -->
+     <script src="https://cdn.jsdelivr.net/npm/leaflet-geotiff@0.2.0/leaflet-geotiff.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet-geotiff@0.2.0/leaflet-geotiff-plotty.min.js"></script>
+    <script src="https://unpkg.com/georaster"></script>
+    <script src="https://unpkg.com/georaster-layer-for-leaflet"></script>
+
+</head>
+<body>
+    <div id="map"></div>
+    <div id="controls">
+        <label for="box-threshold">Box Threshold:</label>
+        <input type="range" id="box-threshold" name="box-threshold" min="0" max="1" step="0.01" value="0.5">
+        <span id="box-threshold-value">0.5</span>
+
+        <label for="text-threshold">Text Threshold:</label>
+        <input type="range" id="text-threshold" name="text-threshold" min="0" max="1" step="0.01" value="0.5">
+        <span id="text-threshold-value">0.5</span>
+
+        <label for="text-prompt">Text Prompt:</label>
+        <input type="text" id="text-prompt" name="text-prompt" placeholder="Enter your prompt here">
+
+        <button id="submit-button" onclick="sendData()">Submit</button>
+    </div>
+    <script>
+        // Инициализация карты
+        var map = L.map('map').setView([55.751244, 37.618423], 10); // Центрируем карту на Москве
+
+        L.tileLayer(
+            'http://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Esri',
+            name: 'Esri Satellite'
+        }).addTo(map);
+        // Инициализируем объект overlays и добавляем контроллер слоев
+        var overlays = {};
+        var layerControl = L.control.layers(null, overlays).addTo(map);
+
+        var drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+        
+        var drawControl = new L.Control.Draw({
+            draw: {
+                polyline: false,
+                polygon: false,
+                circle: false,
+                circlemarker: false,
+                marker: false,
+                rectangle: true
+            },
+            edit: {
+                featureGroup: drawnItems
+            }
+        });
+        map.addControl(drawControl);
+
+        // Переменная для хранения данных о нарисованных объектах
+        var drawnData = [];
+
+        // Обработчик события для захвата данных о нарисованных объектах
+        map.on('draw:created', function (event) {
+            var layer = event.layer;
+            drawnItems.addLayer(layer);
+            drawnData.push(layer.toGeoJSON()); // Сохраняем данные в формате GeoJSON
+        });
+
+        map.on('draw:deleted', function (event) {
+            drawnData = [] // Сохраняем данные в формате GeoJSON
+        });
+
+        // Update slider values display
+        document.getElementById('box-threshold').addEventListener('input', function() {
+            document.getElementById('box-threshold-value').textContent = this.value;
+        });
+
+        document.getElementById('text-threshold').addEventListener('input', function() {
+            document.getElementById('text-threshold-value').textContent = this.value;
+        });
+
+        function getBoundingBox(geojson) {
+            const coordinates = geojson.geometry.coordinates;
+
+            // Для Point: просто возвращаем координаты
+            if (geojson.geometry.type === 'Point') {
+                return [coordinates[0], coordinates[1], coordinates[0], coordinates[1]];
+            }
+
+            // Для других типов (LineString, Polygon и т.д.): ищем min/max
+            let flatCoordinates = [];
+
+            // Функция для рекурсивного обхода координат (вложенные массивы)
+            function flatten(coords) {
+                if (Array.isArray(coords[0])) {
+                    coords.forEach(flatten); // Если это массив массивов, углубляемся
+                } else {
+                    flatCoordinates.push(coords);
+                }
+            }
+
+            flatten(coordinates);
+
+            const lons = flatCoordinates.map(coord => coord[0]);
+            const lats = flatCoordinates.map(coord => coord[1]);
+
+            const minLon = Math.min(...lons);
+            const minLat = Math.min(...lats);
+            const maxLon = Math.max(...lons);
+            const maxLat = Math.max(...lats);
+
+            return [minLon, minLat, maxLon, maxLat];
+        }
+
+        var layerCount = 0;
+        // Функция sendData
+        async function sendData() {
+            try {
+                // Получение значений из элементов управления
+                const boxThreshold = document.getElementById('box-threshold').value;
+                const textThreshold = document.getElementById('text-threshold').value;
+                const textPrompt = document.getElementById('text-prompt').value;
+
+                // Подготовка данных для отправки
+                const data = {
+                    boxThreshold: boxThreshold,
+                    textThreshold: textThreshold,
+                    textPrompt: textPrompt,
+                    drawnData: drawnData
+                };
+
+                // Отправка данных на локальный сервер
+                const response = await fetch('http://127.0.0.1:5000/segmentation', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Ошибка сети: ' + response.statusText);
+                }
+                
+                // Получаем массив байтов (ArrayBuffer) из ответа
+                const arrayBuffer = await response.arrayBuffer();
+                // const blob = new Blob([arrayBuffer], { type: 'image/tiff' });
+                // const url = URL.createObjectURL(blob);
+                // const tiff = await GeoTIFF.parse(arrayBuffer);
+                // const image = await tiff.getImage();
+                // const bounds = image.getBoundingBox(); 
+                // console.log(bounds);
+                // console.log(getBoundingBox(drawnData[0]));
+                // const bdn = getBoundingBox(drawnData[0]);
+                // var latLngBounds = L.latLngBounds([[bdn[1],bdn[0]],[bdn[3],bdn[2]]]);
+                
+                var georaster = await parseGeoraster(arrayBuffer);
+                console.log("georaster:", georaster);
+                var layer = new GeoRasterLayer({
+                    georaster: georaster,
+                    opacity: 0.5,
+                    resolution: 256
+                }).addTo(map); // Добавляем слой на карту
+
+                // Генерируем уникальное имя для слоя
+                layerCount += 1;
+                var layerName = "Слой " + layerCount;
+
+                // Добавляем новый слой в объект overlays
+                overlays[layerName] = layer;
+
+                // Добавляем новый слой в контроллер слоев
+                layerControl.addOverlay(layer, layerName);
+
+                
+                // Добавляем GeoTIFF на карту с использованием leaflet-geotiff (нет прозрачности)
+                // const geotiffLayer = new L.LeafletGeotiff(url, {
+                //     bounds: [[bdn[1],bdn[0]],[bdn[3],bdn[2]]],
+                //     band: 0, // канал для отображения
+                //     renderer: new L.LeafletGeotiff.Plotty({
+                //         colorScale: 'viridis',
+                //     }),
+                //     opacity: 0.5    
+                // Добавляем GeoTIFF на карту с использованием imageOverlay (не работает по blob url)           
+                // }).addTo(map);
+                // const imageOverlay = L.imageOverlay(
+                //     url,
+                //     latLngBounds,
+                //     {
+                //         opacity: 0.85
+                //     }
+                // ).addTo(map); 
+
+            } catch (error) {
+                console.error('Ошибка:', error);
+            }
+        }
+
+    </script>
+    <style>
+        #map {
+            width: 100%;
+            height: 900px;
+        }
+
+        #controls {
+            position: absolute;
+            top: 220px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        #controls label {
+            display: block;
+            margin-top: 10px;
+        }
+
+        #controls input[type="range"] {
+            width: 100%;
+        }
+
+        #submit-button {
+            margin-top: 10px;
+            padding: 5px 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #submit-button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</body>
+</html>
