@@ -35,54 +35,40 @@
         referrerpolicy="no-referrer"
     ></script>
 
-    <!-- Стиль для карты -->
-    <style>
-        #map {
-            width: 100%;
-            height: 900px;
-        }
-    </style>
-    <!-- geotiff.js -->
-    <script src="https://cdn.jsdelivr.net/npm/geotiff@0.3.6/dist/geotiff.min.js"></script>
-    <!-- plotty -->
-    <script src="https://cdn.jsdelivr.net/npm/plotty@0.4.9/dist/plotty.min.js"></script>
-
-    <!-- leaflet-geotiff -->
-     <script src="https://cdn.jsdelivr.net/npm/leaflet-geotiff@0.2.0/leaflet-geotiff.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/leaflet-geotiff@0.2.0/leaflet-geotiff-plotty.min.js"></script>
-    <script src="https://unpkg.com/georaster"></script>
-    <script src="https://unpkg.com/georaster-layer-for-leaflet"></script>
-
 </head>
 <body>
-    <div id="map"></div>
+    <div id="map" style="width: 100%; height: 900px;"></div>
     <div id="controls">
         <label for="box-threshold">Box Threshold:</label>
-        <input type="range" id="box-threshold" name="box-threshold" min="0" max="1" step="0.01" value="0.5">
-        <span id="box-threshold-value">0.5</span>
+        <input type="range" id="box-threshold" name="box-threshold" min="0" max="1" step="0.01" value="0.21">
+        <span id="box-threshold-value">0.21</span>
 
         <label for="text-threshold">Text Threshold:</label>
-        <input type="range" id="text-threshold" name="text-threshold" min="0" max="1" step="0.01" value="0.5">
-        <span id="text-threshold-value">0.5</span>
+        <input type="range" id="text-threshold" name="text-threshold" min="0" max="1" step="0.01" value="0.21">
+        <span id="text-threshold-value">0.21</span>
 
         <label for="text-prompt">Text Prompt:</label>
         <input type="text" id="text-prompt" name="text-prompt" placeholder="Enter your prompt here">
 
         <button id="submit-button" onclick="sendData()">Submit</button>
     </div>
-    <script>
-        // Инициализация карты
-        var map = L.map('map').setView([55.751244, 37.618423], 10); // Центрируем карту на Москве
 
+    <!-- Включаем фрагмент управления слоями -->
+    {% include 'controls.html' %}
+
+    <script>
+        var map = L.map('map').setView([55.751244, 37.618423], 10); // Создаем и центрируем карту на Москве
+    
         L.tileLayer(
             'http://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Esri',
             name: 'Esri Satellite'
         }).addTo(map);
+    
         // Инициализируем объект overlays и добавляем контроллер слоев
         var overlays = {};
         var layerControl = L.control.layers(null, overlays).addTo(map);
-
+    
         var drawnItems = new L.FeatureGroup();
         map.addLayer(drawnItems);
         
@@ -100,64 +86,48 @@
             }
         });
         map.addControl(drawControl);
-
-        // Переменная для хранения данных о нарисованных объектах
-        var drawnData = [];
-
-        // Обработчик события для захвата данных о нарисованных объектах
+        
+        // Сохранение последней созданной области
+        var drawnData = null;
         map.on('draw:created', function (event) {
+            drawnItems.clearLayers();
             var layer = event.layer;
             drawnItems.addLayer(layer);
-            drawnData.push(layer.toGeoJSON()); // Сохраняем данные в формате GeoJSON
+            drawnData = layer.toGeoJSON(); 
+            console.log(drawnData)
         });
-
-        map.on('draw:deleted', function (event) {
-            drawnData = [] // Сохраняем данные в формате GeoJSON
-        });
-
-        // Update slider values display
+    
         document.getElementById('box-threshold').addEventListener('input', function() {
             document.getElementById('box-threshold-value').textContent = this.value;
         });
-
+    
         document.getElementById('text-threshold').addEventListener('input', function() {
             document.getElementById('text-threshold-value').textContent = this.value;
         });
-
-        function getBoundingBox(geojson) {
-            const coordinates = geojson.geometry.coordinates;
-
-            // Для Point: просто возвращаем координаты
-            if (geojson.geometry.type === 'Point') {
-                return [coordinates[0], coordinates[1], coordinates[0], coordinates[1]];
-            }
-
-            // Для других типов (LineString, Polygon и т.д.): ищем min/max
-            let flatCoordinates = [];
-
-            // Функция для рекурсивного обхода координат (вложенные массивы)
-            function flatten(coords) {
-                if (Array.isArray(coords[0])) {
-                    coords.forEach(flatten); // Если это массив массивов, углубляемся
-                } else {
-                    flatCoordinates.push(coords);
-                }
-            }
-
-            flatten(coordinates);
-
-            const lons = flatCoordinates.map(coord => coord[0]);
-            const lats = flatCoordinates.map(coord => coord[1]);
-
-            const minLon = Math.min(...lons);
-            const minLat = Math.min(...lats);
-            const maxLon = Math.max(...lons);
-            const maxLat = Math.max(...lats);
-
-            return [minLon, minLat, maxLon, maxLat];
+    
+        // Инициализация объекта для хранения слоев
+        window.layers = {};
+    
+        // Функция для добавления нового слоя
+        function addLayerToControl(name, layer) {
+            window.layers[name] = layer; 
+            layerControl.addOverlay(layer, name);
+            updateLayerSelect();
         }
-
-        var layerCount = 0;
+    
+        // Функция для обновления выпадающего списка слоев
+        function updateLayerSelect() {
+            var layerSelect = document.getElementById('layer-select');
+            layerSelect.innerHTML = ''; // Очищаем список
+    
+            for (var name in window.layers) {
+                var option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                layerSelect.appendChild(option);
+            }
+        }
+    
         // Функция sendData
         async function sendData() {
             try {
@@ -165,7 +135,7 @@
                 const boxThreshold = document.getElementById('box-threshold').value;
                 const textThreshold = document.getElementById('text-threshold').value;
                 const textPrompt = document.getElementById('text-prompt').value;
-
+    
                 // Подготовка данных для отправки
                 const data = {
                     boxThreshold: boxThreshold,
@@ -173,7 +143,7 @@
                     textPrompt: textPrompt,
                     drawnData: drawnData
                 };
-
+    
                 // Отправка данных на локальный сервер
                 const response = await fetch('http://127.0.0.1:5000/segmentation', {
                     method: 'POST',
@@ -182,72 +152,31 @@
                     },
                     body: JSON.stringify(data)
                 });
-
+                const geojson = await response.json()
                 if (!response.ok) {
                     throw new Error('Ошибка сети: ' + response.statusText);
                 }
-                
-                // Получаем массив байтов (ArrayBuffer) из ответа
-                const arrayBuffer = await response.arrayBuffer();
-                // const blob = new Blob([arrayBuffer], { type: 'image/tiff' });
-                // const url = URL.createObjectURL(blob);
-                // const tiff = await GeoTIFF.parse(arrayBuffer);
-                // const image = await tiff.getImage();
-                // const bounds = image.getBoundingBox(); 
-                // console.log(bounds);
-                // console.log(getBoundingBox(drawnData[0]));
-                // const bdn = getBoundingBox(drawnData[0]);
-                // var latLngBounds = L.latLngBounds([[bdn[1],bdn[0]],[bdn[3],bdn[2]]]);
-                
-                var georaster = await parseGeoraster(arrayBuffer);
-                console.log("georaster:", georaster);
-                var layer = new GeoRasterLayer({
-                    georaster: georaster,
-                    opacity: 0.5,
-                    resolution: 256
-                }).addTo(map); // Добавляем слой на карту
-
-                // Генерируем уникальное имя для слоя
-                layerCount += 1;
-                var layerName = "Слой " + layerCount;
-
-                // Добавляем новый слой в объект overlays
-                overlays[layerName] = layer;
-
-                // Добавляем новый слой в контроллер слоев
-                layerControl.addOverlay(layer, layerName);
-
-                
-                // Добавляем GeoTIFF на карту с использованием leaflet-geotiff (нет прозрачности)
-                // const geotiffLayer = new L.LeafletGeotiff(url, {
-                //     bounds: [[bdn[1],bdn[0]],[bdn[3],bdn[2]]],
-                //     band: 0, // канал для отображения
-                //     renderer: new L.LeafletGeotiff.Plotty({
-                //         colorScale: 'viridis',
-                //     }),
-                //     opacity: 0.5    
-                // Добавляем GeoTIFF на карту с использованием imageOverlay (не работает по blob url)           
-                // }).addTo(map);
-                // const imageOverlay = L.imageOverlay(
-                //     url,
-                //     latLngBounds,
-                //     {
-                //         opacity: 0.85
-                //     }
-                // ).addTo(map); 
-
+                console.log(geojson.features)
+    
+                // Создаем новый GeoJSON слой
+                var geojsonLayer = L.geoJSON(geojson, {
+                    style: {
+                        color: "#ff0000",
+                        weight: 2,
+                        fillOpacity: 0.3
+                    }
+                }).addTo(map);
+    
+                // Добавляем слой в контроллер и обновляем интерфейс
+                var layerName = "GeoJSON Layer " + Object.keys(window.layers).length;
+                addLayerToControl(layerName, geojsonLayer);
+    
             } catch (error) {
                 console.error('Ошибка:', error);
             }
         }
-
     </script>
     <style>
-        #map {
-            width: 100%;
-            height: 900px;
-        }
-
         #controls {
             position: absolute;
             top: 220px;

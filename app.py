@@ -1,23 +1,15 @@
-from flask import Flask, render_template, request, send_file
-from samgeo import tms_to_geotiff
+# pip install flask segment-geospatial
+from flask import Flask, render_template, request, jsonify
+from samgeo import tms_to_geotiff, raster_to_vector
 from samgeo.text_sam import LangSAM
-
+import json
 import os
-os.environ['PROJ_LIB'] = r'C:\Users\UserPC\GEOAI\GEOAI-venv\Lib\site-packages\rasterio\proj_data'
-os.environ['GDAL_DATA'] =r'C:\Users\UserPC\GEOAI\GEOAI-venv\Lib\site-packages\osgeo\data'
+from shapely.geometry import shape
+from torch.cuda import is_available, empty_cache
+os.environ['PROJ_LIB'] = r'C:\Users\UserPC\Desktop\GEOAI\venv\Lib\site-packages\rasterio\proj_data'
+os.environ['GDAL_DATA'] =r'C:\Users\UserPC\Desktop\GEOAI\venv\Lib\site-packages\osgeo\data'
 
 app = Flask(__name__)
-
-# Извлечение bounding box
-def extract_bbox_from_drawn_data(drawn_data):
-    if drawn_data and len(drawn_data) > 0:
-        geometry = drawn_data[0]['geometry']
-        coordinates = geometry['coordinates'][0]
-        min_xy = coordinates[0]
-        max_xy = coordinates[2]
-
-        return [min_xy,max_xy]
-    return None
 
 @app.route("/")
 @app.route("/map")
@@ -27,28 +19,41 @@ def show_map():
 @app.route("/segmentation", methods=['POST'])
 def segmentation():
     data = request.get_json()
-
     box_threshold = float(data.get('boxThreshold'))
     text_threshold = float(data.get('textThreshold'))
     text_prompt = data.get('textPrompt')
     drawn_data = data.get('drawnData')
-
-    bbox = extract_bbox_from_drawn_data(drawn_data)
-    print(bbox)
+    
+    # извлекаем bounding box
+    polygon = shape(drawn_data['geometry'])
+    bbox = list(polygon.bounds)
 
     tms_to_geotiff(
-        bbox=[bbox[0][0],bbox[0][1],bbox[1][0],bbox[1][1]],
+        bbox=bbox,
         output="flask_image.tif",
         source='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         zoom=19,
         overwrite=True,
     )
-    # использую модель "sam2-hiera-tiny" из-за того что слабо нагружает пк, лучше использовать "sam2-hiera-large"
-    # sam = LangSAM(model_type="sam2-hiera-tiny")
+
     sam = LangSAM(model_type="sam2-hiera-large")
-    sam.predict("flask_image.tif", text_prompt, box_threshold=box_threshold, text_threshold=text_threshold, output="flask_mask.tif")
+    ans = sam.predict(
+        "flask_image.tif",
+        text_prompt,
+        box_threshold=box_threshold, 
+        text_threshold=text_threshold, 
+        output="flask_mask.tif",
+        return_results=True
+    )
+    #очистка кэша cuda
+    if is_available():
+        empty_cache()
 
-    return send_file("flask_mask.tif", mimetype='image/tiff')
+    print(ans)
+    raster_to_vector("flask_mask.tif", "flask_mask.geojson",dst_crs="EPSG:4326")
+    with open('flask_mask.geojson', 'r', encoding='utf-8') as file:
+        geojson_data = json.load(file)
 
+    return jsonify(geojson_data)
 if __name__ == '__main__':
     app.run(debug=True)
