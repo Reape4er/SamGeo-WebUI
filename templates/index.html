@@ -37,24 +37,44 @@
 
 </head>
 <body>
-    <div id="map" style="width: 100%; height: 900px;"></div>
-    <div id="controls">
-        <label for="box-threshold">Box Threshold:</label>
-        <input type="range" id="box-threshold" name="box-threshold" min="0" max="1" step="0.01" value="0.21">
-        <span id="box-threshold-value">0.21</span>
+    <div style="position: relative;">
+        <div id="map" style="width: 100%; height: 900px;"></div>
 
-        <label for="text-threshold">Text Threshold:</label>
-        <input type="range" id="text-threshold" name="text-threshold" min="0" max="1" step="0.01" value="0.21">
-        <span id="text-threshold-value">0.21</span>
+        <div style="position: absolute; top: 210px; left: 12px; z-index: 1000;">
+            <div id="controls">
+                <label for="box-threshold">Box Threshold:</label>
+                <input type="range" id="box-threshold" name="box-threshold" min="0" max="1" step="0.01" value="0.21">
+                <span id="box-threshold-value">0.21</span>
 
-        <label for="text-prompt">Text Prompt:</label>
-        <input type="text" id="text-prompt" name="text-prompt" placeholder="Enter your prompt here">
+                <label for="text-threshold">Text Threshold:</label>
+                <input type="range" id="text-threshold" name="text-threshold" min="0" max="1" step="0.01" value="0.21">
+                <span id="text-threshold-value">0.21</span>
 
-        <button id="submit-button" onclick="sendData()">Submit</button>
+                <label for="text-prompt">Text Prompt:</label>
+                <input type="text" id="text-prompt" name="text-prompt" placeholder="Enter your prompt here">
+
+                <!-- Параметры для батчевого предсказания -->
+                <label for="batch-prediction">
+                    <input type="checkbox" id="batch-prediction" name="batch-prediction"> Batch Prediction
+                </label>
+
+                <div id="batch-params" style="display: none;">
+                    <label for="tile-width">Tile Width:</label>
+                    <input type="number" id="tile-width" name="tile-width" min="1" value="512">
+
+                    <label for="tile-height">Tile Height:</label>
+                    <input type="number" id="tile-height" name="tile-height" min="1" value="512">
+
+                    <label for="overlap">Overlap (pixels):</label>
+                    <input type="number" id="overlap" name="overlap" min="0" value="64">
+                </div>
+
+                <button id="submit-button" onclick="sendData()">Submit</button>
+            </div>
+            <!-- Добавляем панель управления слоями -->
+            {% include 'style_controls.html' %}
+        </div>
     </div>
-
-    <!-- Включаем фрагмент управления слоями -->
-    {% include 'controls.html' %}
 
     <script>
         var map = L.map('map').setView([55.751244, 37.618423], 10); // Создаем и центрируем карту на Москве
@@ -105,6 +125,12 @@
             document.getElementById('text-threshold-value').textContent = this.value;
         });
     
+        // Обработка чекбокса для отображения параметров батчевого предсказания
+        document.getElementById('batch-prediction').addEventListener('change', function() {
+            var batchParams = document.getElementById('batch-params');
+            batchParams.style.display = this.checked ? 'block' : 'none';
+        });
+    
         // Инициализация объекта для хранения слоев
         window.layers = {};
     
@@ -135,13 +161,20 @@
                 const boxThreshold = document.getElementById('box-threshold').value;
                 const textThreshold = document.getElementById('text-threshold').value;
                 const textPrompt = document.getElementById('text-prompt').value;
+                const batchPrediction = document.getElementById('batch-prediction').checked;
+                const tileWidth = document.getElementById('tile-width').value;
+                const tileHeight = document.getElementById('tile-height').value;
+                const overlap = document.getElementById('overlap').value;
     
                 // Подготовка данных для отправки
                 const data = {
                     boxThreshold: boxThreshold,
                     textThreshold: textThreshold,
                     textPrompt: textPrompt,
-                    drawnData: drawnData
+                    drawnData: drawnData,
+                    batchPrediction: batchPrediction,
+                    tileSize: batchPrediction ? [parseInt(tileWidth), parseInt(tileHeight)] : null,
+                    overlap: batchPrediction ? parseInt(overlap) : null
                 };
     
                 // Отправка данных на локальный сервер
@@ -178,14 +211,11 @@
     </script>
     <style>
         #controls {
-            position: absolute;
-            top: 220px;
-            left: 20px;
             background-color: rgba(255, 255, 255, 0.8);
             padding: 10px;
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-            z-index: 1000;
+            margin-bottom: 12px;
         }
 
         #controls label {
@@ -209,6 +239,14 @@
 
         #submit-button:hover {
             background-color: #0056b3;
+        }
+
+        #batch-params label {
+            margin-top: 5px;
+        }
+
+        #batch-params input[type="number"] {
+            width: 100%;
         }
     </style>
 </body>

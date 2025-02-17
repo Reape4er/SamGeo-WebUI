@@ -1,0 +1,37 @@
+<div class="style-controls">
+    <h3>Управление стилями слоев</h3>
+    <label for="layer-select">Выберите слой:</label>
+    <select id="layer-select">
+        <!-- Опции будут добавлены через JavaScript -->
+    </select>
+    <br>
+    <label for="color">Цвет:</label>
+    <input type="color" id="color" value="#ff0000">
+    <br>
+    <label for="weight">Толщина:</label>
+    <input type="range" id="weight" value="2" min="1">
+    <br>
+    <label for="opacity">Прозрачность:</label>
+    <input type="range" id="opacity" value="0.3" min="0" max="1" step="0.1">
+    <script src="{{ url_for('static', filename='js/style_controls.js') }}"></script>
+</div>
+
+<style>
+    .style-controls {
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+    }
+
+    .style-controls label {
+        display: block;
+        margin-top: 10px;
+    }
+
+    .style-controls input[type="color"],
+    .style-controls input[type="number"] {
+        width: 100%;
+    }
+</style>
