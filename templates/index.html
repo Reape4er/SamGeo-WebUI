@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Карта Leaflet с инструментами рисования</title>
-
+    <title>GEOAI MAP</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
     <!-- Подключение стилей Leaflet -->
     <link
         rel="stylesheet"
@@ -34,13 +34,14 @@
         crossorigin="anonymous"
         referrerpolicy="no-referrer"
     ></script>
-
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
 <body>
     <div style="position: relative;">
-        <div id="map" style="width: 100%; height: 900px;"></div>
+        <div id="map" style="width: 100%; height: 100vh;"></div>
 
-        <div style="position: absolute; top: 210px; left: 12px; z-index: 1000;">
+        <div style="position: absolute; bottom: 10px; left: 12px; z-index: 1000;">
             <div id="controls">
                 <label for="box-threshold">Box Threshold:</label>
                 <input type="range" id="box-threshold" name="box-threshold" min="0" max="1" step="0.01" value="0.21">
@@ -74,142 +75,23 @@
             <!-- Добавляем панель управления слоями -->
             {% include 'style_controls.html' %}
         </div>
+        <div style="position: absolute; bottom: 20px; right: 20px; z-index: 1000; background-color: rgba(255, 255, 255, 0.8); padding: 10px; border-radius: 5px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);">
+            <h3>GeoJSON Layers</h3>
+            <ul id="geojson-list" style="list-style-type: none; padding: 0;">
+                <!-- Список будет заполняться динамически -->
+            </ul>
+            <button id="load-button" onclick="downloadSelectedLayers()">Скачать выбранные</button>
+        </div>
     </div>
-
-    <script>
-        var map = L.map('map').setView([55.751244, 37.618423], 10); // Создаем и центрируем карту на Москве
-    
-        L.tileLayer(
-            'http://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Esri',
-            name: 'Esri Satellite'
-        }).addTo(map);
-    
-        // Инициализируем объект overlays и добавляем контроллер слоев
-        var overlays = {};
-        var layerControl = L.control.layers(null, overlays).addTo(map);
-    
-        var drawnItems = new L.FeatureGroup();
-        map.addLayer(drawnItems);
-        
-        var drawControl = new L.Control.Draw({
-            draw: {
-                polyline: false,
-                polygon: false,
-                circle: false,
-                circlemarker: false,
-                marker: false,
-                rectangle: true
-            },
-            edit: {
-                featureGroup: drawnItems
-            }
-        });
-        map.addControl(drawControl);
-        
-        // Сохранение последней созданной области
-        var drawnData = null;
-        map.on('draw:created', function (event) {
-            drawnItems.clearLayers();
-            var layer = event.layer;
-            drawnItems.addLayer(layer);
-            drawnData = layer.toGeoJSON(); 
-            console.log(drawnData)
-        });
-    
-        document.getElementById('box-threshold').addEventListener('input', function() {
-            document.getElementById('box-threshold-value').textContent = this.value;
-        });
-    
-        document.getElementById('text-threshold').addEventListener('input', function() {
-            document.getElementById('text-threshold-value').textContent = this.value;
-        });
-    
-        // Обработка чекбокса для отображения параметров батчевого предсказания
-        document.getElementById('batch-prediction').addEventListener('change', function() {
-            var batchParams = document.getElementById('batch-params');
-            batchParams.style.display = this.checked ? 'block' : 'none';
-        });
-    
-        // Инициализация объекта для хранения слоев
-        window.layers = {};
-    
-        // Функция для добавления нового слоя
-        function addLayerToControl(name, layer) {
-            window.layers[name] = layer; 
-            layerControl.addOverlay(layer, name);
-            updateLayerSelect();
-        }
-    
-        // Функция для обновления выпадающего списка слоев
-        function updateLayerSelect() {
-            var layerSelect = document.getElementById('layer-select');
-            layerSelect.innerHTML = ''; // Очищаем список
-    
-            for (var name in window.layers) {
-                var option = document.createElement('option');
-                option.value = name;
-                option.textContent = name;
-                layerSelect.appendChild(option);
-            }
-        }
-    
-        // Функция sendData
-        async function sendData() {
-            try {
-                // Получение значений из элементов управления
-                const boxThreshold = document.getElementById('box-threshold').value;
-                const textThreshold = document.getElementById('text-threshold').value;
-                const textPrompt = document.getElementById('text-prompt').value;
-                const batchPrediction = document.getElementById('batch-prediction').checked;
-                const tileWidth = document.getElementById('tile-width').value;
-                const tileHeight = document.getElementById('tile-height').value;
-                const overlap = document.getElementById('overlap').value;
-    
-                // Подготовка данных для отправки
-                const data = {
-                    boxThreshold: boxThreshold,
-                    textThreshold: textThreshold,
-                    textPrompt: textPrompt,
-                    drawnData: drawnData,
-                    batchPrediction: batchPrediction,
-                    tileSize: batchPrediction ? [parseInt(tileWidth), parseInt(tileHeight)] : null,
-                    overlap: batchPrediction ? parseInt(overlap) : null
-                };
-    
-                // Отправка данных на локальный сервер
-                const response = await fetch('http://127.0.0.1:5000/segmentation', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(data)
-                });
-                const geojson = await response.json()
-                if (!response.ok) {
-                    throw new Error('Ошибка сети: ' + response.statusText);
-                }
-                console.log(geojson.features)
-    
-                // Создаем новый GeoJSON слой
-                var geojsonLayer = L.geoJSON(geojson, {
-                    style: {
-                        color: "#ff0000",
-                        weight: 2,
-                        fillOpacity: 0.3
-                    }
-                }).addTo(map);
-    
-                // Добавляем слой в контроллер и обновляем интерфейс
-                var layerName = "GeoJSON Layer " + Object.keys(window.layers).length;
-                addLayerToControl(layerName, geojsonLayer);
-    
-            } catch (error) {
-                console.error('Ошибка:', error);
-            }
-        }
-    </script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Roboto', sans-serif;
+        }
         #controls {
             background-color: rgba(255, 255, 255, 0.8);
             padding: 10px;

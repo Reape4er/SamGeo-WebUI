@@ -1,3 +1,22 @@
+// Функция для обновления значения
+function updateValue(inputId, outputId) {
+    const input = document.getElementById(inputId);
+    const output = document.getElementById(outputId);
+    if (input && output) {
+        // Обновляем значение
+        output.textContent = input.value;
+        // Добавляем обработчик события для обновления значения при изменении
+        input.addEventListener('input', () => {
+            output.textContent = input.value;
+        });
+    }
+}
+
+// Обновляем значения для каждого input
+updateValue('color', 'color-value'); 
+updateValue('weight', 'weight-value');
+updateValue('opacity', 'opacity-value'); 
+
 document.addEventListener('DOMContentLoaded', function() {
     const layerSelect = document.getElementById('layer-select');
     const colorInput = document.getElementById('color');
@@ -37,7 +56,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (selectedLayer) {
             const { color, weight, fillOpacity } = selectedLayer.options.style;
 
-            // Устанавливаем значения в поля ввода
             colorInput.value = color;
             weightInput.value = weight;
             opacityInput.value = fillOpacity;
