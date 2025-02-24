@@ -1,20 +1,28 @@
-# pip install flask segment-geospatial
-import shutil
-from flask import Flask, abort, render_template, request, jsonify
-from samgeo import tms_to_geotiff, raster_to_vector, split_raster
-from samgeo.text_sam import LangSAM
 import json
 import os
 from shapely.geometry import shape
-from torch.cuda import is_available, empty_cache
+
+from flask import abort, Flask, jsonify, render_template, request
+from googletrans import Translator
+from samgeo import raster_to_vector, split_raster, tms_to_geotiff
+from samgeo.text_sam import LangSAM
+from torch.cuda import empty_cache, is_available
+
+import shutil
 
 os.environ['PROJ_LIB'] = r'C:\Users\UserPC\Desktop\GEOAI\venv\Lib\site-packages\rasterio\proj_data'
-os.environ['GDAL_DATA'] =r'C:\Users\UserPC\Desktop\GEOAI\venv\Lib\site-packages\osgeo\data'
-
+os.environ['GDAL_DATA'] = r'C:\Users\UserPC\Desktop\GEOAI\venv\Lib\site-packages\osgeo\data'
 
 app = Flask(__name__)
 print("запуск модели")
 sam = LangSAM(model_type="sam2-hiera-large")
+translator = Translator()
+
+async def translate_text(text, src='ru', dest='en'):
+    async with Translator() as translator:
+        result = await translator.translate(text, dest, src)
+        print(result)
+        return result.text
 
 def process_batch_segmentation(image_path, tileSize, overlap, text_prompt, box_threshold, text_threshold):
     print("сплит")
@@ -55,6 +63,7 @@ def process_single_segmentation(image_path, text_prompt, box_threshold, text_thr
     )
 
     print("очистка кэша")
+    print(is_available())
     if is_available():
         empty_cache()
 
@@ -71,7 +80,7 @@ def show_map():
     return render_template('index.html')
 
 @app.route("/segmentation", methods=['POST'])
-def segmentation():
+async def segmentation():
     print("Принято")
     data = request.get_json()
     if not data:
@@ -89,12 +98,14 @@ def segmentation():
     drawn_data = data['drawnData']
     batchPrediction = bool(data['batchPrediction'])
 
-    # Извлекаем bounding box
+    print("перевод текста")
+    text_prompt = await translate_text(text_prompt)
+    print(f"Переведенный текст: {text_prompt}")
+
     polygon = shape(drawn_data['geometry'])
     bbox = list(polygon.bounds)
     print("загрузка карты")
 
-    # Загружаем карту с выделенной области
     tms_to_geotiff(
         bbox=bbox,
         output="flask_image.tif",
@@ -114,14 +125,12 @@ def segmentation():
         print(e)
         return abort(500, "server error")
     finally:
-        # Очистка временных папок
         if os.path.exists("batch_prediction/tiles"):
             shutil.rmtree("batch_prediction/tiles")
         if os.path.exists("batch_prediction/masks"):
             shutil.rmtree("batch_prediction/masks")
 
-
     return jsonify(geojson_data)
 
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, use_reloader=False, debug=True)
+    app.run(host='0.0.0.0', port=9000, use_reloader=False, debug=True)

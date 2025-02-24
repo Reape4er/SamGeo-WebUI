@@ -104,7 +104,7 @@ async function sendData() {
         };
 
         // Отправка данных на локальный сервер
-        const response = await fetch('http://127.0.0.1:5000/segmentation', {
+        const response = await fetch('http://192.168.0.101:9000/segmentation', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
