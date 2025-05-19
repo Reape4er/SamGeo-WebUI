@@ -1,21 +1,22 @@
 import json
 import os
 from shapely.geometry import shape
+from flask_cors import CORS
 
 from flask import abort, Flask, jsonify, render_template, request
 from googletrans import Translator
-from samgeo import raster_to_vector, split_raster, tms_to_geotiff
+from samgeo import raster_to_vector, split_raster, tms_to_geotiff, SamGeo2, regularize
 from samgeo.text_sam import LangSAM
 from torch.cuda import empty_cache, is_available
-
 import shutil
+import numpy as np
 
-os.environ['PROJ_LIB'] = r'C:\Users\UserPC\Desktop\GEOAI\venv\Lib\site-packages\rasterio\proj_data'
-os.environ['GDAL_DATA'] = r'C:\Users\UserPC\Desktop\GEOAI\venv\Lib\site-packages\osgeo\data'
+os.environ['PROJ_LIB'] = r'.\venv\Lib\site-packages\rasterio\proj_data'
+os.environ['GDAL_DATA'] = r'.\venv\Lib\site-packages\osgeo\data'
 
 app = Flask(__name__)
-print("запуск модели")
-sam = LangSAM(model_type="sam2-hiera-large")
+CORS(app)
+
 translator = Translator()
 
 async def translate_text(text, src='ru', dest='en'):
@@ -25,6 +26,8 @@ async def translate_text(text, src='ru', dest='en'):
         return result.text
 
 def process_batch_segmentation(image_path, tileSize, overlap, text_prompt, box_threshold, text_threshold):
+    print("запуск модели")
+    sam = LangSAM(model_type="sam2-hiera-large")
     print("сплит")
     split_raster(image_path, out_dir="batch_prediction/tiles", tile_size=tileSize, overlap=overlap)
 
@@ -53,6 +56,8 @@ def process_batch_segmentation(image_path, tileSize, overlap, text_prompt, box_t
     return geojson_data
 
 def process_single_segmentation(image_path, text_prompt, box_threshold, text_threshold):
+    print("запуск модели")
+    sam = LangSAM(model_type="sam2-hiera-large")
     print("предсказание")
     sam.predict(
         image_path,
@@ -74,38 +79,30 @@ def process_single_segmentation(image_path, text_prompt, box_threshold, text_thr
 
     return geojson_data
 
-@app.route("/")
-@app.route("/map")
-def show_map():
-    return render_template('index.html')
-
 @app.route("/segmentation", methods=['POST'])
 async def segmentation():
-    print("Принято")
     data = request.get_json()
     if not data:
         abort(400, description="Request body is missing or not valid JSON")
 
-    required_keys = ['boxThreshold', 'textThreshold', 'textPrompt', 'drawnData', 'batchPrediction']
+    required_keys = ['boxThreshold', 'textThreshold', 'textPrompt', 'geojson', 'batchPrediction']
     for key in required_keys:
         if key not in data:
             abort(400, description=f"Key '{key}' is required in the request body")
 
-    print("Извлечение")
     box_threshold = float(data['boxThreshold'])
     text_threshold = float(data['textThreshold'])
     text_prompt = data['textPrompt']
-    drawn_data = data['drawnData']
+    drawn_data = data['geojson']
     batchPrediction = bool(data['batchPrediction'])
 
-    print("перевод текста")
     text_prompt = await translate_text(text_prompt)
     print(f"Переведенный текст: {text_prompt}")
 
     polygon = shape(drawn_data['geometry'])
     bbox = list(polygon.bounds)
     print("загрузка карты")
-
+    print(bbox)
     tms_to_geotiff(
         bbox=bbox,
         output="flask_image.tif",
@@ -132,5 +129,59 @@ async def segmentation():
 
     return jsonify(geojson_data)
 
+@app.route('/segmentation/marker', methods=['POST'])
+async def segmentationByMarker():
+    sam_point = SamGeo2(
+        model_id="sam2-hiera-large",
+        automatic=False,
+    )
+    data = request.get_json()
+    print(data)
+    coords = []
+    labels = []
+    for group in ("inclusion", "exclusion"):
+        for feat in data.get(group, []):
+            lon, lat = feat["geometry"]["coordinates"]
+            print(group)
+            coords.append((lon, lat))
+            labels.append(1 if group=='inclusion' else -1)
+    print(coords) 
+    print(labels)
+    # Масив lon/lat → min / max
+    arr = np.array(coords)
+    min_lon, min_lat = arr.min(axis=0)
+    max_lon, max_lat = arr.max(axis=0)
+
+    pad = 0.5    # 20 %
+    dlon = (max_lon - min_lon) * pad
+    dlat = (max_lat - min_lat) * pad
+    bbox_padded = [
+        min_lon - dlon,
+        min_lat - dlat,
+        max_lon + dlon,
+        max_lat + dlat,
+    ]
+    tms_to_geotiff(
+        bbox=bbox_padded,
+        output="flask_image.tif",
+        source='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        zoom=19,
+        overwrite=True,
+    )
+    sam_point.set_image("flask_image.tif")
+    sam_point.predict_by_points(
+        point_coords_batch=coords,
+        point_labels_batch=labels,
+        point_crs="EPSG:4326",
+        output="flask_mask.tif",
+        dtype="uint8",
+    )
+    
+    raster_to_vector("flask_mask.tif", "flask_mask.geojson", dst_crs="EPSG:4326")
+
+    with open('flask_mask.geojson', 'r', encoding='utf-8') as file:
+        geojson_data = json.load(file)
+    return jsonify(geojson_data)
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=9000, use_reloader=False, debug=True)
+    app.run(use_reloader=True, debug=True)
