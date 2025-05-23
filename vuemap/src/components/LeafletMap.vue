@@ -2,17 +2,28 @@
   <div ref="mapContainer" class="map-container"></div>
   <LayerControl v-show="hasFeatures" :layers="featuresLayers" />
   <GeoJSONExporter v-show="hasFeatures" :featuresLayers="featuresLayers" />
+  <ToolMenu @load-photo="triggerFileInput" @clear-photo="removeImage" :file="file" />
+  <input
+    ref="fileInput"
+    type="file"
+    accept=".tif,.tiff"
+    @change="handleFileUpload"
+    style="display: none"
+  />
 </template>
 
 <script setup>
 import { ref, onMounted, watch, computed } from 'vue'
 import { useMapStore } from '@/stores/mapStore'
-import L, { featureGroup } from 'leaflet'
+import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw'
 import 'leaflet-draw/dist/leaflet.draw.css'
 import LayerControl from './LayerControl.vue'
 import GeoJSONExporter from './GeojsonExporter.vue'
+import ToolMenu from './ToolMenu.vue'
+import parseGeoraster from 'georaster'
+import GeoRasterLayer from 'georaster-layer-for-leaflet'
 
 const props = defineProps({
   center: { type: Array, default: () => [55.751244, 37.618423] },
@@ -31,13 +42,15 @@ const props = defineProps({
 const mapStore = useMapStore()
 const mapContainer = ref(null)
 const hasFeatures = computed(() => featuresLayers.value.length > 0)
+const fileInput = ref(null)
+const georasterLayer = ref(null)
+const file = ref(null)
 
 let map = null
 let drawControl = null
 let layersControl = null
 const previousPromptLayer = ref(null)
 const markerLayer = L.featureGroup()
-
 const featuresLayers = ref([])
 
 const createMarkerIcon = (color) => {
@@ -172,7 +185,63 @@ function addFeaturesLayer(features) {
     layersControl.addOverlay(layer, `Features Layer ${featuresLayers.value.length}`)
   }
 }
+const triggerFileInput = () => {
+  console.log('work triggerFileInput?')
+  fileInput.value.click()
+}
+const handleFileUpload = async (event) => {
+  console.log('work handleFileUpload?')
+  file.value = event.target.files[0]
+  if (!file.value) return
+  try {
+    const georaster = await parseGeoraster(file.value)
+    console.log(georaster)
 
+    if (georasterLayer.value && map) {
+      map.removeLayer(georasterLayer.value)
+    }
+    const numBands = georaster.values.length
+    georasterLayer.value = new GeoRasterLayer({
+      georaster: georaster,
+      opacity: 1,
+      resolution: 128,
+      updateWhenIdle: false,
+      updateWhenZooming: true,
+      pixelValuesToColorFn: (values) => {
+        // Обработка разных случаев:
+        // 1. Если 4 канала (RGBA)
+        if (numBands >= 4) {
+          return `rgba(${values[0]}, ${values[1]}, ${values[2]}, ${values[3] / 255})`
+        }
+        // 2. Если 3 канала (RGB) - добавляем альфа=1
+        else if (numBands === 3) {
+          return `rgba(${values[0]}, ${values[1]}, ${values[2]}, 1)`
+        }
+        // 3. Если 1 канал (grayscale) - преобразуем в RGBA
+        else {
+          return `rgba(${values[0]}, ${values[0]}, ${values[0]}, 1)`
+        }
+      },
+    })
+
+    if (map) {
+      georasterLayer.value.addTo(map)
+      map.fitBounds(georasterLayer.value.getBounds())
+      map.setMaxBounds(georasterLayer.value.getBounds().pad(0.3))
+      map.setMaxZoom(22)
+    }
+  } catch (error) {
+    console.error('Error loading GeoTIFF:', error)
+    alert('Failed to load GeoTIFF file. See console for details.')
+  }
+}
+const removeImage = () => {
+  if (georasterLayer.value && map) {
+    map.removeLayer(georasterLayer.value)
+    file.value = null
+    fileInput.value.value = null
+  }
+}
 onMounted(() => {
   setupMap()
   updateDrawControl()

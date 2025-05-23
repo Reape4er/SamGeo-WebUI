@@ -37,7 +37,11 @@
 import { ref } from 'vue'
 import { useMapStore } from '@/stores/mapStore'
 import axios from 'axios'
-
+const props = defineProps({
+  file: {
+    type: File,
+  },
+})
 const boxThreshold = ref(0.21)
 const textThreshold = ref(0.21)
 const textPrompt = ref('')
@@ -48,22 +52,39 @@ const overlap = ref(64)
 const mapStore = useMapStore()
 
 const submit = async () => {
-  const data = {
-    boxThreshold: boxThreshold.value,
-    textThreshold: textThreshold.value,
-    textPrompt: textPrompt.value,
-    batchPrediction: isBatchPrediction.value,
-    tileSize: [tileWidth.value, tileHeight.value],
-    overlap: overlap.value,
-    geojson: mapStore.activeDrawnData,
+  console.log(props.file) // Проверяем, что файл есть
+
+  // Создаем FormData для отправки файла + данных
+  const formData = new FormData()
+
+  // Добавляем файл, если он есть
+  if (props.file) {
+    formData.append('file', props.file)
+  } else {
+    // Если файла нет, добавляем GeoJSON (как строку)
+    formData.append('geojson', JSON.stringify(mapStore.activeDrawnData))
   }
 
+  // Добавляем остальные параметры
+  formData.append('boxThreshold', boxThreshold.value)
+  formData.append('textThreshold', textThreshold.value)
+  formData.append('textPrompt', textPrompt.value)
+  formData.append('batchPrediction', isBatchPrediction.value)
+  formData.append('tileSize', JSON.stringify([tileWidth.value, tileHeight.value]))
+  formData.append('overlap', overlap.value)
+
   try {
-    const response = await axios.post('http://127.0.0.1:5000/segmentation', data)
+    const response = await axios.post('http://127.0.0.1:5000/segmentation', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data', // Важно для файлов!
+      },
+    })
+
     mapStore.setServerResponse(response.data.features)
     console.log(response.data.features)
   } catch (error) {
-    console.error(error)
+    console.error('Ошибка при отправке:', error)
+    // Можно добавить уведомление для пользователя
   }
 }
 </script>

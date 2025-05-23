@@ -21,7 +21,11 @@
 <script setup>
 import { useMapStore } from '@/stores/mapStore'
 import axios from 'axios'
-
+const props = defineProps({
+  file: {
+    type: File,
+  },
+})
 const mapStore = useMapStore()
 
 const changeMarkerMode = (mode) => {
@@ -29,10 +33,26 @@ const changeMarkerMode = (mode) => {
 }
 
 const submit = async () => {
-  const data = mapStore.activeDrawnData
+  console.log(props.file)
+  const formData = new FormData()
+
+  if (props.file) {
+    formData.append('file', props.file)
+  }
+  formData.append(
+    'data',
+    JSON.stringify({
+      inclusion: mapStore.activeDrawnData.inclusion || [],
+      exclusion: mapStore.activeDrawnData.exclusion || [],
+    }),
+  )
 
   try {
-    const response = await axios.post('http://127.0.0.1:5000/segmentation/marker', data)
+    const response = await axios.post('http://127.0.0.1:5000/segmentation/marker', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
     mapStore.setServerResponse(response.data.features)
     console.log(response.data)
   } catch (error) {

@@ -1,10 +1,10 @@
 <template>
-  <myComponents />
+  <LeafletMap />
 </template>
 
 <script setup>
 import { onMounted } from 'vue'
-import myComponents from './components/myComponents.vue'
+import LeafletMap from './components/LeafletMap.vue'
 import { applyLeafletDrawPatch } from './utils/leaflet-draw-patch'
 
 // Применяем патч при монтировании приложения
