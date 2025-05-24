@@ -45,10 +45,10 @@ export const useMapStore = defineStore('map', {
           break
         case 'markers':
           this.drawnData.markers[type].push(geoJSON)
-          console.log(this.drawnData)
           break
         case 'multi':
           this.drawnData.multiRects.push(geoJSON)
+          console.log(this.drawnData)
           break
       }
     },
@@ -57,8 +57,6 @@ export const useMapStore = defineStore('map', {
       this.serverFeatures = features
     },
     removeMarkersByGeoJSON(geoJSONCollection) {
-      if (!geoJSONCollection || geoJSONCollection.type !== 'FeatureCollection') return
-
       // Проходим по всем маркерам в inclusion и exclusion
       for (const markerType of ['inclusion', 'exclusion']) {
         this.drawnData.markers[markerType] = this.drawnData.markers[markerType].filter((marker) => {
@@ -70,6 +68,15 @@ export const useMapStore = defineStore('map', {
           )
         })
       }
+    },
+    removeRectByGeoJSON(geoJSONCollection) {
+      this.drawnData.multiRects = this.drawnData.multiRects.filter((rect) => {
+        return !geoJSONCollection.features.some(
+          (feature) =>
+            JSON.stringify(feature.geometry.coordinates) ===
+            JSON.stringify(rect.geometry.coordinates),
+        )
+      })
     },
   },
 })

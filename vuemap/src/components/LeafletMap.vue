@@ -51,6 +51,7 @@ let drawControl = null
 let layersControl = null
 const previousPromptLayer = ref(null)
 const markerLayer = L.featureGroup()
+const boxLayer = L.featureGroup()
 const featuresLayers = ref([])
 
 const createMarkerIcon = (color) => {
@@ -86,7 +87,7 @@ const drawModes = {
     circlemarker: false,
   },
   multi: {
-    rectangle: true,
+    rectangle: { repeatMode: true },
     marker: false,
     polyline: false,
     polygon: false,
@@ -107,8 +108,8 @@ function updateDrawControl() {
   drawControl = new L.Control.Draw({
     draw: drawModes[mapStore.activeMode],
     edit: {
-      featureGroup: markerLayer,
-      remove: mapStore.activeMode === 'markers' ? true : false,
+      featureGroup: mapStore.activeMode === 'markers' ? markerLayer : boxLayer,
+      remove: mapStore.activeMode === 'markers' || mapStore.activeMode === 'multi',
       edit: false,
     },
   })
@@ -139,6 +140,7 @@ function handleDrawCreated(e) {
 
     case 'multi':
       map.addLayer(layer)
+      boxLayer.addLayer(layer)
       mapStore.saveDrawnFeature(geoJSON, 'multi')
       break
   }
@@ -159,13 +161,25 @@ function setupMap() {
   const baseLayer = L.tileLayer(props.tileLayerUrl, props.tileLayerOptions).addTo(map)
 
   markerLayer.addTo(map)
+  boxLayer.addTo(map)
   layersControl = L.control.layers({ 'Base Layer': baseLayer }).addTo(map)
 
   map.on('draw:created', handleDrawCreated)
   map.on('draw:deleted', handleDrawDeleted)
 }
 function handleDrawDeleted(e) {
-  mapStore.removeMarkersByGeoJSON(e.layers.toGeoJSON())
+  switch (mapStore.activeMode) {
+    case 'prompt':
+      break
+
+    case 'markers':
+      mapStore.removeMarkersByGeoJSON(e.layers.toGeoJSON())
+      break
+
+    case 'multi':
+      mapStore.removeRectByGeoJSON(e.layers.toGeoJSON())
+      break
+  }
 }
 function addFeaturesLayer(features) {
   if (!features?.length || !map) return

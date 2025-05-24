@@ -1,5 +1,7 @@
 import json
 import os
+from pyproj import CRS, Transformer
+from shapely import MultiPoint, box
 from shapely.geometry import shape
 from flask_cors import CORS
 from flask import abort, Flask, jsonify, request
@@ -81,7 +83,34 @@ def process_single_segmentation(image_path, text_prompt, box_threshold, text_thr
     with open('flask_mask.geojson', 'r', encoding='utf-8') as file:
         geojson_data = json.load(file)
     return geojson_data
+def calculate_padded_bbox(coords, buffer_meters):
+    import geopandas as gpd
+    from shapely.geometry import box
+    import numpy as np
 
+    # Преобразуем координаты в массив
+    arr = np.array(coords)
+    min_lon, min_lat = arr.min(axis=0)
+    max_lon, max_lat = arr.max(axis=0)
+
+    # Создаем bbox в формате shapely
+    bbox = box(min_lon, min_lat, max_lon, max_lat)
+    gdf = gpd.GeoDataFrame(geometry=[bbox], crs="EPSG:4326")
+
+    # Переводим в проекцию с метрами (обычно UTM)
+    gdf_utm = gdf.to_crs(gdf.estimate_utm_crs())
+
+    # Буферизация
+    gdf_utm["geometry"] = gdf_utm.geometry.buffer(buffer_meters)
+
+    # Обратно в WGS84
+    gdf_buffered = gdf_utm.to_crs("EPSG:4326")
+
+    # Получаем геометрию буфера
+    buffered_geom = gdf_buffered.geometry.iloc[0]
+
+    # Вариант 1: вернуть саму буферную геометрию (Polygon)
+    return buffered_geom.bounds
 
 # Настройки
 UPLOAD_FOLDER = tempfile.gettempdir()
@@ -209,9 +238,9 @@ async def segmentationByMarker():
                     abort(400, description="No selected file")
                 
                 # Сохраняем временный файл
-                filename = secure_filename(file.filename)  # Обезопасим имя файла
-                name, ext = os.path.splitext(filename)  # Разделяем имя и расширение
-                random_filename = f"{name}_{uuid.uuid4().hex}{ext}"  # Добавляем UUID
+                filename = secure_filename(file.filename)
+                name, ext = os.path.splitext(filename)
+                random_filename = f"{name}_{uuid.uuid4().hex}{ext}"
                 input_file_path = os.path.join(UPLOAD_FOLDER, random_filename)
                 file.save(input_file_path)
                 print(f"Using uploaded file: {input_file_path}")
@@ -237,20 +266,7 @@ async def segmentationByMarker():
             image_path = input_file_path
         else:
             # Вычисляем bbox и загружаем карту
-            arr = np.array(coords)
-            min_lon, min_lat = arr.min(axis=0)
-            max_lon, max_lat = arr.max(axis=0)
-
-            pad = 0.3  # 20%
-            dlon = (max_lon - min_lon) * pad
-            dlat = (max_lat - min_lat) * pad
-            bbox_padded = [
-                min_lon - dlon,
-                min_lat - dlat,
-                max_lon + dlon,
-                max_lat + dlat,
-            ]
-
+            bbox_padded = list(calculate_padded_bbox(coords, 150))
             image_path = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4().hex}.tif")
             tms_to_geotiff(
                 bbox=bbox_padded,
@@ -296,6 +312,72 @@ async def segmentationByMarker():
             empty_cache()
         traceback.print_exc()
         abort(500, description=f"Internal server error: {str(e)}")
+
+@app.route('/segmentation/boxes', methods=['POST'])
+async def segmentationByBox():
+    geojson_list = json.loads(request.form['geojsons'])
+    bbox_list = []
+    for geojson in geojson_list:
+        polygon = shape(geojson['geometry'])
+        bbox_list.append(list(polygon.bounds))
+    print(request)
+    print(request.files)
+    if 'file' in request.files:
+        print('файл есть')
+        file = request.files['file']
+        if file.filename == '':
+            abort(400, description="No selected file")
+            
+        if not allowed_file(file.filename):
+            abort(400, description="Invalid file type")
+            
+        filename = secure_filename(file.filename)
+        image_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(image_path)
+        print(f"Using uploaded file: {image_path}")
+    else:
+        print('файл нету')
+        arr = np.array(bbox_list)
+        print(arr)
+        min_lon = np.min(arr[:, 0])
+        min_lat = np.min(arr[:, 1])
+        max_lon = np.max(arr[:, 2])
+        max_lat = np.max(arr[:, 3])
+        pad = 0.2  # 20%
+        dlon = (max_lon - min_lon) * pad
+        dlat = (max_lat - min_lat) * pad
+        bbox_padded = [
+            min_lon - dlon,
+            min_lat - dlat,
+            max_lon + dlon,
+            max_lat + dlat,
+        ]
+        image_path = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4().hex}.tif")
+        tms_to_geotiff(
+                    bbox=bbox_padded,
+                    output=image_path,
+                    source='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    zoom=19,
+                    overwrite=True,
+                )
+            # Обработка SAM
+    output_mask_path = os.path.join(UPLOAD_FOLDER, "flask_mask.tif")
+    output_geojson_path = os.path.join(UPLOAD_FOLDER, "flask_mask.geojson")
+    sam_point.set_image(image_path)
+    sam_point.predict(boxes=bbox_list, point_crs="EPSG:4326", output=output_mask_path, dtype="uint8")
+    if is_available():
+        empty_cache()
+    raster_to_vector(output_mask_path, output_geojson_path, dst_crs="EPSG:4326")
+    with open(output_geojson_path, 'r', encoding='utf-8') as file:
+            geojson_data = json.load(file)
+
+    # Очистка временных файлов
+    for path in [image_path, output_mask_path, output_geojson_path]:
+        if os.path.exists(path):
+            os.remove(path)
+
+    return jsonify(geojson_data)
+
 
 if __name__ == '__main__':
     app.run(use_reloader=True, debug=True)

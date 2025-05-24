@@ -36,7 +36,7 @@
     <div class="tool-content">
       <Prompt_tool v-if="activeTool === 'prompt'" :file="file" />
       <Marker_tool v-else-if="activeTool === 'markers'" :file="file" />
-      <div v-else-if="activeTool === 'multi'">Инструмент 3 (заглушка)</div>
+      <Box_tool v-else-if="activeTool === 'multi'" :file="file" />
     </div>
   </div>
 </template>
@@ -45,6 +45,7 @@
 import { ref } from 'vue'
 import Prompt_tool from './Prompt_tool.vue'
 import Marker_tool from './Marker_tool.vue'
+import Box_tool from './Box_tool.vue'
 import { useMapStore } from '@/stores/mapStore'
 
 defineEmits(['load-photo', 'clear-photo'])
